@@ -66,6 +66,16 @@ type Move struct {
 	Pass  *Pass  `json:"pass",omitempty`
 }
 
+func (m Move) String() string {
+	if m.Claim != nil {
+		return fmt.Sprintf("claim:%+v", m.Claim)
+	} else if m.Pass != nil {
+		return fmt.Sprintf("pass:%+v", m.Pass)
+	} else {
+		return "empty"
+	}
+}
+
 type Moves struct {
 	Moves []Move `json:"moves"`
 }
@@ -172,13 +182,12 @@ func onlineMode() (err error) {
 	if err != nil {
 		return
 	}
-	log.Printf("handshake succeeded")
 
 	setupRequest, err := setup(conn)
 	if err != nil {
 		return
 	}
-	log.Printf("Setup %v", setupRequest)
+	log.Printf("Setup %+v", setupRequest)
 
 	for {
 		var serverMove ServerMove
