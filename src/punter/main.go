@@ -12,7 +12,7 @@ import (
 
 var server = flag.String("server", "punter.inf.ed.ac.uk", "server ip")
 var port = flag.Int("port", 9001, "server port")
-var name = flag.String("name", "iris punter", "bot name")
+var name = flag.String("name", "blueiris", "bot name")
 
 type HandshakeRequest struct {
 	Me string `json:"me"`
