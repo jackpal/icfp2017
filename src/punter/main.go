@@ -22,6 +22,34 @@ type HandshakeResponse struct {
 	You string `json:"you"`
 }
 
+type PunterID int
+type SiteID int
+
+type Site struct {
+	ID SiteID `json:"id"`
+}
+
+type River struct {
+	Source SiteID `json:"source"`
+	Target SiteID `json:"target"`
+}
+
+type Map struct {
+	Sites  []Site   `json:"sites"`
+	Rivers []River  `json:"rivers"`
+	Mines  []SiteID `json:"mines"`
+}
+
+type SetupRequest struct {
+	Punter  PunterID `json:"punter"`
+	Punters int      `json:"punters"`
+	Map     Map      `json:"map"`
+}
+
+type SetupResponse struct {
+	Ready PunterID `json:"ready"`
+}
+
 func findServer() (conn net.Conn, err error) {
 	p := *port
 	serverAddress := fmt.Sprintf("%s:%d", *server, p)
@@ -43,7 +71,7 @@ func send(conn io.Writer, d interface{}) (err error) {
 	}
 	b = buf.Bytes()
 	msg := fmt.Sprintf("%d:%s", len(b), b)
-	log.Printf("Sending: %s", msg)
+	// log.Printf("Sending: %s", msg)
 	_, err = conn.Write([]byte(msg))
 	if err != nil {
 		return
@@ -51,41 +79,81 @@ func send(conn io.Writer, d interface{}) (err error) {
 	return err
 }
 
-func main() {
-	flag.Parse()
-	conn, err := findServer()
+func receive(conn io.Reader, d interface{}) (err error) {
+	var i int
+	_, err = fmt.Fscanf(conn, "%d:", &i)
 	if err != nil {
-		log.Fatal(err)
+		return
 	}
-	log.Printf("Got connection")
+	// log.Printf("Reading %d bytes", i)
+	b1 := make([]byte, i)
+	offset := 0
+	for offset < i {
+		var n int
+		n, err = conn.Read(b1[offset:])
+		if err != nil {
+			return
+		}
+		offset += n
+	}
+	// log.Printf("Bytes: %d %v", len(b1), b1)
+	// listen for reply
+	err = json.Unmarshal(b1, d)
+	return err
+}
+
+func handshake(conn io.ReadWriter) (err error) {
 	handshakeRequest := HandshakeRequest{*name}
 	err = send(conn, &handshakeRequest)
 	if err != nil {
-		log.Fatal(err)
+		return
 	}
-	log.Printf("Waiting for reply")
 
-	var i int
-	_, err = fmt.Fscanf(conn, "%d", &i)
-	if err != nil {
-		log.Fatal(err)
-	}
-	log.Printf("N bytes: %d", i)
-	b1 := make([]byte, i)
-	_, err = conn.Read(b1)
-	if err != nil {
-		log.Fatal(err)
-	}
+	// log.Printf("Waiting for reply")
 	// listen for reply
 	var handshakeResponse HandshakeResponse
-	if err := json.Unmarshal(b1, &handshakeResponse); err == io.EOF {
-		log.Printf("server closed connection")
-		if err != nil {
-			log.Fatal(err)
-		}
+	err = receive(conn, &handshakeResponse)
+	if err != nil {
 		return
-	} else if err != nil {
+	}
+	// fmt.Printf("response %v\n", handshakeResponse)
+	return
+}
+
+func setup(conn io.ReadWriter) (setupRequest SetupRequest, err error) {
+	err = receive(conn, &setupRequest)
+	if err != nil {
+		return
+	}
+	setupResponse := SetupResponse{setupRequest.Punter}
+	err = send(conn, &setupResponse)
+	return
+}
+
+func main() {
+	flag.Parse()
+	err := onlineMode()
+	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("response %v\n", handshakeResponse)
+}
+
+func onlineMode() (err error) {
+	conn, err := findServer()
+	if err != nil {
+		return
+	}
+	log.Printf("connected")
+	err = handshake(conn)
+	if err != nil {
+		return
+	}
+	log.Printf("handshake succeeded")
+
+	setupRequest, err := setup(conn)
+	if err != nil {
+		return
+	}
+	log.Printf("Setup %v", setupRequest)
+	return
 }
