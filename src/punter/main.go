@@ -32,8 +32,8 @@ type Site struct {
 type River struct {
 	Source  SiteID   `json:"source"`
 	Target  SiteID   `json:"target"`
-	Claimed bool     `json:"claimed"`
-	Owner   PunterID `json:"owner"`
+	Claimed bool     `json:"claimed",omitempty`
+	Owner   PunterID `json:"owner",omitempty`
 }
 
 type Map struct {
@@ -183,6 +183,21 @@ func processServerMove(setupRequest SetupRequest, serverMove ServerMove) (err er
 	return
 }
 
+func pickPass(setupRequest SetupRequest) (move Move, err error) {
+	move = Move{nil, &Pass{setupRequest.Punter}}
+	return
+}
+
+func pickFirstUnclaimed(setupRequest SetupRequest) (move Move, err error) {
+	for _, river := range setupRequest.Map.Rivers {
+		if river.Claimed == false {
+			move.Claim = &Claim{setupRequest.Punter, river.Source, river.Target}
+			return
+		}
+	}
+	return pickPass(setupRequest)
+}
+
 func main() {
 	flag.Parse()
 	err := onlineMode()
@@ -215,7 +230,15 @@ func onlineMode() (err error) {
 			return
 		}
 		err = processServerMove(setupRequest, serverMove)
-		move := Move{nil, &Pass{setupRequest.Punter}}
+		if err != nil {
+			return
+		}
+		var move Move
+		move, err = pickFirstUnclaimed(setupRequest)
+		if err != nil {
+			return
+		}
+		log.Printf("Move: %v", move)
 		err = send(conn, move)
 		if err != nil {
 			return
