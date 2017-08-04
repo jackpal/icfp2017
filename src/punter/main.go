@@ -30,8 +30,10 @@ type Site struct {
 }
 
 type River struct {
-	Source SiteID `json:"source"`
-	Target SiteID `json:"target"`
+	Source  SiteID   `json:"source"`
+	Target  SiteID   `json:"target"`
+	Claimed bool     `json:"claimed"`
+	Owner   PunterID `json:"owner"`
 }
 
 type Map struct {
@@ -164,6 +166,23 @@ func setup(conn io.ReadWriter) (setupRequest SetupRequest, err error) {
 	return
 }
 
+func processServerMove(setupRequest SetupRequest, serverMove ServerMove) (err error) {
+	for _, move := range serverMove.Move.Moves {
+		if move.Claim != nil {
+			for riverIndex, river := range setupRequest.Map.Rivers {
+				if river.Source == move.Claim.Source &&
+					river.Target == move.Claim.Target {
+					river.Claimed = true
+					river.Owner = move.Claim.Punter
+					setupRequest.Map.Rivers[riverIndex] = river
+					break
+				}
+			}
+		}
+	}
+	return
+}
+
 func main() {
 	flag.Parse()
 	err := onlineMode()
@@ -187,15 +206,15 @@ func onlineMode() (err error) {
 	if err != nil {
 		return
 	}
-	log.Printf("Setup %+v", setupRequest)
 
 	for {
+		log.Printf("Setup %+v", setupRequest)
 		var serverMove ServerMove
 		err = receive(conn, &serverMove)
 		if err != nil {
 			return
 		}
-		log.Printf("Server move %+v", serverMove)
+		err = processServerMove(setupRequest, serverMove)
 		move := Move{nil, &Pass{setupRequest.Punter}}
 		err = send(conn, move)
 		if err != nil {
