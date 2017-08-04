@@ -50,6 +50,30 @@ type SetupResponse struct {
 	Ready PunterID `json:"ready"`
 }
 
+type Claim struct {
+	Punter PunterID `json:"punter"`
+	Source SiteID   `json:"source"`
+	Target SiteID   `json:"target"`
+}
+
+type Pass struct {
+	Punter PunterID `json:"punter"`
+}
+
+// Poor man's union type. Only one of Claim or Pass is non-null
+type Move struct {
+	Claim *Claim `json:"claim",omitempty`
+	Pass  *Pass  `json:"pass",omitempty`
+}
+
+type Moves struct {
+	Moves []Move `json:"moves"`
+}
+
+type ServerMove struct {
+	Move Moves `json:"move"`
+}
+
 func findServer() (conn net.Conn, err error) {
 	p := *port
 	serverAddress := fmt.Sprintf("%s:%d", *server, p)
@@ -155,5 +179,19 @@ func onlineMode() (err error) {
 		return
 	}
 	log.Printf("Setup %v", setupRequest)
+
+	for {
+		var serverMove ServerMove
+		err = receive(conn, &serverMove)
+		if err != nil {
+			return
+		}
+		log.Printf("Server move %+v", serverMove)
+		move := Move{nil, &Pass{setupRequest.Punter}}
+		err = send(conn, move)
+		if err != nil {
+			return
+		}
+	}
 	return
 }
