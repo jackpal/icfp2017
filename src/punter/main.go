@@ -7,10 +7,12 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
+	logging "log"
 	"net"
 	"os"
 )
+
+var log *logging.Logger = logging.New(os.Stderr, "", 0)
 
 type readWriter struct {
 	io.Reader
