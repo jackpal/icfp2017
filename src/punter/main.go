@@ -8,8 +8,20 @@ import (
 	"io"
 	"log"
 	"net"
+	"os"
 )
 
+type readWriter struct {
+	io.Reader
+	io.Writer
+}
+
+func NewReadWriter(r io.Reader, w io.Writer) io.ReadWriter {
+	return &readWriter{r, w}
+}
+
+// Flags are only used for online mode
+var onlineMode = flag.Bool("online", false, "Use online mode")
 var server = flag.String("server", "punter.inf.ed.ac.uk", "server ip")
 var port = flag.Int("port", 9001, "server port")
 var name = flag.String("name", "blueiris", "bot name")
@@ -227,15 +239,7 @@ func pickFirstUnclaimed(setupRequest SetupRequest) (move Move, err error) {
 	return pickPass(setupRequest)
 }
 
-func main() {
-	flag.Parse()
-	err := onlineMode()
-	if err != nil {
-		log.Fatal(err)
-	}
-}
-
-func onlineMode() (err error) {
+func runOnlineMode() (err error) {
 	conn, err := findServer()
 	if err != nil {
 		return
@@ -274,4 +278,55 @@ func onlineMode() (err error) {
 		}
 	}
 	return
+}
+
+func runOfflineMode() (err error) {
+	conn := NewReadWriter(os.Stdin, os.Stdout)
+	log.Printf("connected")
+	err = handshake(conn)
+	if err != nil {
+		return
+	}
+
+	setupRequest, err := setup(conn)
+	if err != nil {
+		return
+	}
+
+	log.Printf("Setup %+v", setupRequest)
+	var serverMove ServerMove
+	err = receive(conn, &serverMove)
+	if err != nil {
+		return
+	}
+	err = processServerMove(setupRequest, serverMove)
+	if err != nil {
+		return
+	}
+	var move Move
+	move, err = pickFirstUnclaimed(setupRequest)
+	if err != nil {
+		return
+	}
+	log.Printf("Move: %v", move)
+	err = send(conn, move)
+	if err != nil {
+		return
+	}
+	return
+}
+
+func main() {
+	var err error
+	flag.Parse()
+	if *onlineMode {
+		log.Printf("online mode")
+		err = runOnlineMode()
+	} else {
+		log.Printf("offline mode")
+		err = runOfflineMode()
+	}
+	if err != nil {
+		log.Fatal(err)
+	}
 }
