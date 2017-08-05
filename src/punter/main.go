@@ -203,7 +203,7 @@ func handshake(conn io.ReadWriter) (err error) {
 	if err != nil {
 		return
 	}
-	fmt.Printf("response %v\n", handshakeResponse)
+	log.Printf("response %v\n", handshakeResponse)
 	return
 }
 
