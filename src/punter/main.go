@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -60,8 +61,15 @@ type SetupRequest struct {
 	Map     Map      `json:"map"`
 }
 
+type State struct {
+	Punter  PunterID `json:"punter"`
+	Punters int      `json:"punters"`
+	Map     Map      `json:"map"`
+}
+
 type SetupResponse struct {
 	Ready PunterID `json:"ready"`
+	State *State   `json:"state",omitempty`
 }
 
 type Claim struct {
@@ -78,6 +86,7 @@ type Pass struct {
 type Move struct {
 	Claim *Claim `json:"claim",omitempty`
 	Pass  *Pass  `json:"pass",omitempty`
+	State *State `json:"state",omitempty`
 }
 
 func (m Move) String() string {
@@ -106,8 +115,9 @@ type Stop struct {
 
 // Poor man's union. Only one of Move or Stop is non-nil
 type ServerMove struct {
-	Move *Moves `json:"move"`
-	Stop *Stop  `json:"stop"`
+	Move  *Moves `json:"move",omitempty`
+	Stop  *Stop  `json:"stop",omitempty`
+	State *State `json:"state",omitempty`
 }
 
 func findServer() (conn net.Conn, err error) {
@@ -139,25 +149,35 @@ func send(conn io.Writer, d interface{}) (err error) {
 	return err
 }
 
-func receive(conn io.Reader, d interface{}) (err error) {
+func receiveRaw(reader io.Reader) (b1 []byte, err error) {
 	var i int
-	_, err = fmt.Fscanf(conn, "%d:", &i)
+	_, err = fmt.Fscanf(reader, "%d:", &i)
 	if err != nil {
 		return
 	}
-	// log.Printf("Reading %d bytes", i)
-	b1 := make([]byte, i)
+	log.Printf("Reading %d bytes", i)
+	b1 = make([]byte, i)
 	offset := 0
 	for offset < i {
 		var n int
-		n, err = conn.Read(b1[offset:])
+		n, err = reader.Read(b1[offset:])
 		if err != nil {
 			return
 		}
 		offset += n
 	}
-	// log.Printf("Bytes: %d %v", len(b1), b1)
+	log.Printf("Bytes: %d %s", len(b1), string(b1))
 	// listen for reply
+	return
+}
+
+func receive(conn io.Reader, d interface{}) (err error) {
+	var b1 []byte
+	b1, err = receiveRaw(conn)
+	if err != nil {
+		return
+	}
+	// log.Printf("Received Bytes: %d %s", len(b1), string(b1))
 	err = json.Unmarshal(b1, d)
 	return err
 }
@@ -169,46 +189,71 @@ func handshake(conn io.ReadWriter) (err error) {
 		return
 	}
 
-	// log.Printf("Waiting for reply")
+	log.Printf("Waiting for reply")
 	// listen for reply
 	var handshakeResponse HandshakeResponse
 	err = receive(conn, &handshakeResponse)
 	if err != nil {
 		return
 	}
-	// fmt.Printf("response %v\n", handshakeResponse)
+	fmt.Printf("response %v\n", handshakeResponse)
 	return
 }
 
-func setup(conn io.ReadWriter) (setupRequest SetupRequest, err error) {
+func setup(conn io.ReadWriter) (state State, err error) {
+	var setupRequest SetupRequest
 	err = receive(conn, &setupRequest)
 	if err != nil {
 		return
 	}
-	setupResponse := SetupResponse{setupRequest.Punter}
+	log.Printf("Received setupRequest %v", setupRequest)
+	state, err = doSetup(conn, setupRequest)
+	return
+}
+
+func doSetup(conn io.ReadWriter, setupRequest SetupRequest) (state State, err error) {
+	state.Punter = setupRequest.Punter
+	state.Punters = setupRequest.Punters
+	state.Map = setupRequest.Map
+	setupResponse := SetupResponse{setupRequest.Punter, nil}
+	if !*onlineMode {
+		setupResponse.State = &state
+	}
 	err = send(conn, &setupResponse)
 	return
 }
 
-func processServerMove(setupRequest SetupRequest, serverMove ServerMove) (err error) {
+func processServerMove(conn io.ReadWriter, state State, serverMove ServerMove) (err error) {
 	if serverMove.Move != nil {
-		return processMoves(setupRequest, *serverMove.Move)
+		return doMoves(conn, state, *serverMove.Move)
 	} else if serverMove.Stop != nil {
-		return processStop(setupRequest, *serverMove.Stop)
+		return doStop(conn, *serverMove.Stop)
 	} else {
 		return
 	}
 }
 
-func processMoves(setupRequest SetupRequest, moves Moves) (err error) {
+func doMoves(conn io.ReadWriter, state State, moves Moves) (err error) {
+	err = processServerMoves(conn, state, moves)
+	if err != nil {
+		return
+	}
+	err = pickMove(conn, state)
+	if err != nil {
+		return
+	}
+	return
+}
+
+func processServerMoves(conn io.ReadWriter, state State, moves Moves) (err error) {
 	for _, move := range moves.Moves {
 		if move.Claim != nil {
-			for riverIndex, river := range setupRequest.Map.Rivers {
+			for riverIndex, river := range state.Map.Rivers {
 				if river.Source == move.Claim.Source &&
 					river.Target == move.Claim.Target {
 					river.Claimed = true
 					river.Owner = move.Claim.Punter
-					setupRequest.Map.Rivers[riverIndex] = river
+					state.Map.Rivers[riverIndex] = river
 					break
 				}
 			}
@@ -217,26 +262,40 @@ func processMoves(setupRequest SetupRequest, moves Moves) (err error) {
 	return
 }
 
-func processStop(setupRequest SetupRequest, stop Stop) (err error) {
+func pickMove(conn io.ReadWriter, state State) (err error) {
+	var move Move
+	move, err = pickFirstUnclaimed(state)
+	if err != nil {
+		return
+	}
+	log.Printf("Move: %v", move)
+	err = send(conn, move)
+	if err != nil {
+		return
+	}
+	return
+}
+
+func doStop(conn io.ReadWriter, stop Stop) (err error) {
 	for _, score := range stop.Scores {
 		log.Printf("Punter: %d score: %d", score.Punter, score.Score)
 	}
 	return
 }
 
-func pickPass(setupRequest SetupRequest) (move Move, err error) {
-	move = Move{nil, &Pass{setupRequest.Punter}}
+func pickPass(state State) (move Move, err error) {
+	move.Pass = &Pass{state.Punter}
 	return
 }
 
-func pickFirstUnclaimed(setupRequest SetupRequest) (move Move, err error) {
-	for _, river := range setupRequest.Map.Rivers {
+func pickFirstUnclaimed(state State) (move Move, err error) {
+	for _, river := range state.Map.Rivers {
 		if river.Claimed == false {
-			move.Claim = &Claim{setupRequest.Punter, river.Source, river.Target}
+			move.Claim = &Claim{state.Punter, river.Source, river.Target}
 			return
 		}
 	}
-	return pickPass(setupRequest)
+	return pickPass(state)
 }
 
 func runOnlineMode() (err error) {
@@ -250,11 +309,14 @@ func runOnlineMode() (err error) {
 		return
 	}
 
+	log.Printf("setup")
+
 	setupRequest, err := setup(conn)
 	if err != nil {
 		return
 	}
 
+	log.Printf("game")
 	for {
 		log.Printf("Setup %+v", setupRequest)
 		var serverMove ServerMove
@@ -262,17 +324,7 @@ func runOnlineMode() (err error) {
 		if err != nil {
 			return
 		}
-		err = processServerMove(setupRequest, serverMove)
-		if err != nil {
-			return
-		}
-		var move Move
-		move, err = pickFirstUnclaimed(setupRequest)
-		if err != nil {
-			return
-		}
-		log.Printf("Move: %v", move)
-		err = send(conn, move)
+		err = processServerMove(conn, setupRequest, serverMove)
 		if err != nil {
 			return
 		}
@@ -288,30 +340,44 @@ func runOfflineMode() (err error) {
 		return
 	}
 
-	setupRequest, err := setup(conn)
+	var b1 []byte
+	b1, err = receiveRaw(conn)
+	if err != nil {
+		return
+	}
+	var serverRequest map[string]interface{}
+	err = json.Unmarshal(b1, &serverRequest)
 	if err != nil {
 		return
 	}
 
-	log.Printf("Setup %+v", setupRequest)
-	var serverMove ServerMove
-	err = receive(conn, &serverMove)
-	if err != nil {
+	if serverRequest["punter"] != nil {
+		log.Printf("setup")
+		var setupRequest SetupRequest
+		err = json.Unmarshal(b1, &setupRequest)
+		if err != nil {
+			return
+		}
+		_, err = doSetup(conn, setupRequest)
 		return
-	}
-	err = processServerMove(setupRequest, serverMove)
-	if err != nil {
-		return
-	}
-	var move Move
-	move, err = pickFirstUnclaimed(setupRequest)
-	if err != nil {
-		return
-	}
-	log.Printf("Move: %v", move)
-	err = send(conn, move)
-	if err != nil {
-		return
+	} else if serverRequest["move"] != nil {
+		log.Printf("move")
+		var serverMove ServerMove
+		err = json.Unmarshal(b1, &serverMove)
+		if err != nil {
+			return
+		}
+		return doMoves(conn, *serverMove.State, *serverMove.Move)
+	} else if serverRequest["stop"] != nil {
+		log.Printf("stop")
+		var serverMove ServerMove
+		err = json.Unmarshal(b1, &serverMove)
+		if err != nil {
+			return
+		}
+		return doStop(conn, *serverMove.Stop)
+	} else {
+		err = errors.New("Unknown server request")
 	}
 	return
 }
