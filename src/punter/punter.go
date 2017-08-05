@@ -51,16 +51,16 @@ type ScoreValue int
 
 type Site struct {
 	ID     SiteID       `json:"id"`
-	Rivers RiverOffsets `json:"rivers",omitempty`
+	Rivers RiverOffsets `json:"rivers,omitempty"`
 }
 
 type River struct {
 	Source  SiteID   `json:"source"`
 	Target  SiteID   `json:"target"`
-	Claimed bool     `json:"claimed",omitempty`
-	Owner   PunterID `json:"owner",omitempty`
+	Claimed bool     `json:"claimed,omitempty"`
+	Owner   PunterID `json:"owner,omitempty"`
 	// Use for searching
-	Flags int `json:-`
+	Flags int `json:"flags,omitempty"`
 }
 
 type Map struct {
@@ -68,7 +68,7 @@ type Map struct {
 	Rivers []River  `json:"rivers"`
 	Mines  []SiteID `json:"mines"`
 	// Lookup site from siteID
-	SiteMap map[SiteID]SiteOffset `json:siteMap,omitEmpty`
+	SiteMap map[SiteID]SiteOffset `json:"siteMap,omitempty"`
 }
 
 func (m *Map) DecorateMap() (err error) {
@@ -103,7 +103,7 @@ type State struct {
 
 type SetupResponse struct {
 	Ready PunterID `json:"ready"`
-	State *State   `json:"state",omitempty`
+	State *State   `json:"state,omitempty"`
 }
 
 type Claim struct {
@@ -118,9 +118,9 @@ type Pass struct {
 
 // Poor man's union type. Only one of Claim or Pass is non-nil
 type Move struct {
-	Claim *Claim `json:"claim",omitempty`
-	Pass  *Pass  `json:"pass",omitempty`
-	State *State `json:"state",omitempty`
+	Claim *Claim `json:"claim,omitempty"`
+	Pass  *Pass  `json:"pass,omitempty"`
+	State *State `json:"state,omitempty"`
 }
 
 func (m Move) String() string {
