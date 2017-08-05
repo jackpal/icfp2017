@@ -5,6 +5,8 @@ set -u
 
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
+cd $DIR
+
 rm -rf submission/src
 mkdir -p submission/src/punter
 
