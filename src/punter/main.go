@@ -22,8 +22,8 @@ type HandshakeResponse struct {
 	You string `json:"you"`
 }
 
-type PunterID int
-type SiteID int
+type PunterID uint
+type SiteID uint
 
 type Site struct {
 	ID SiteID `json:"id"`
@@ -62,7 +62,7 @@ type Pass struct {
 	Punter PunterID `json:"punter"`
 }
 
-// Poor man's union type. Only one of Claim or Pass is non-null
+// Poor man's union type. Only one of Claim or Pass is non-nil
 type Move struct {
 	Claim *Claim `json:"claim",omitempty`
 	Pass  *Pass  `json:"pass",omitempty`
@@ -82,8 +82,20 @@ type Moves struct {
 	Moves []Move `json:"moves"`
 }
 
+type Score struct {
+	Punter PunterID `json:"punter"`
+	Score  int      `json:"score"`
+}
+
+type Stop struct {
+	Moves  []Move  `json:"moves"`
+	Scores []Score `json:"scores"`
+}
+
+// Poor man's union. Only one of Move or Stop is non-nil
 type ServerMove struct {
-	Move Moves `json:"move"`
+	Move *Moves `json:"move"`
+	Stop *Stop  `json:"stop"`
 }
 
 func findServer() (conn net.Conn, err error) {
@@ -167,7 +179,17 @@ func setup(conn io.ReadWriter) (setupRequest SetupRequest, err error) {
 }
 
 func processServerMove(setupRequest SetupRequest, serverMove ServerMove) (err error) {
-	for _, move := range serverMove.Move.Moves {
+	if serverMove.Move != nil {
+		return processMoves(setupRequest, *serverMove.Move)
+	} else if serverMove.Stop != nil {
+		return processStop(setupRequest, *serverMove.Stop)
+	} else {
+		return
+	}
+}
+
+func processMoves(setupRequest SetupRequest, moves Moves) (err error) {
+	for _, move := range moves.Moves {
 		if move.Claim != nil {
 			for riverIndex, river := range setupRequest.Map.Rivers {
 				if river.Source == move.Claim.Source &&
@@ -179,6 +201,13 @@ func processServerMove(setupRequest SetupRequest, serverMove ServerMove) (err er
 				}
 			}
 		}
+	}
+	return
+}
+
+func processStop(setupRequest SetupRequest, stop Stop) (err error) {
+	for _, score := range stop.Scores {
+		log.Printf("Punter: %d score: %d", score.Punter, score.Score)
 	}
 	return
 }
