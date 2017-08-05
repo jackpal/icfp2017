@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -156,7 +155,7 @@ type ServerMove struct {
 func findServer() (conn net.Conn, err error) {
 	p := *port
 	serverAddress := fmt.Sprintf("%s:%d", *server, p)
-	log.Printf("Trying %s", serverAddress)
+	// log.Printf("Trying %s", serverAddress)
 	conn, err = net.Dial("tcp", serverAddress)
 	if err == nil {
 		return
@@ -176,10 +175,9 @@ func send(writer io.Writer, d interface{}) (err error) {
 	// Don't need to send linefeed at end
 	b = b[:len(b)-1]
 	msg := fmt.Sprintf("%d:%s", len(b), b)
-	log.Printf("Sending: %s", msg)
-	var n int
-	n, err = io.WriteString(writer, msg)
-	log.Printf("sent %d bytes", n)
+	// log.Printf("Sending: %s", msg)
+	_, err = io.WriteString(writer, msg)
+	// log.Printf("sent %d bytes", n)
 	if err != nil {
 		return
 	}
@@ -192,7 +190,7 @@ func receiveRaw(reader io.Reader) (b1 []byte, err error) {
 	if err != nil {
 		return
 	}
-	log.Printf("Reading %d bytes", i)
+	// log.Printf("Reading %d bytes", i)
 	b1 = make([]byte, i)
 	offset := 0
 	for offset < i {
@@ -203,7 +201,7 @@ func receiveRaw(reader io.Reader) (b1 []byte, err error) {
 		}
 		offset += n
 	}
-	log.Printf("Bytes: %d %s", len(b1), string(b1))
+	// log.Printf("Bytes: %d %s", len(b1), string(b1))
 	// listen for reply
 	return
 }
@@ -214,7 +212,7 @@ func receive(conn io.Reader, d interface{}) (err error) {
 	if err != nil {
 		return
 	}
-	log.Printf("Received Bytes: %d %s", len(b1), string(b1))
+	// log.Printf("Received Bytes: %d %s", len(b1), string(b1))
 	err = json.Unmarshal(b1, d)
 	return err
 }
@@ -226,7 +224,7 @@ func handshake(conn io.ReadWriter) (err error) {
 		return
 	}
 
-	log.Printf("Waiting for reply")
+	// log.Printf("Waiting for reply")
 	// listen for reply
 	var handshakeResponse HandshakeResponse
 	err = receive(conn, &handshakeResponse)
@@ -243,7 +241,7 @@ func setup(conn io.ReadWriter) (state State, err error) {
 	if err != nil {
 		return
 	}
-	log.Printf("Received setupRequest %v", setupRequest)
+	// log.Printf("Received setupRequest %v", setupRequest)
 	state, err = doSetup(conn, setupRequest)
 	return
 }
@@ -265,7 +263,7 @@ func processServerMove(conn io.ReadWriter, state State, serverMove ServerMove) (
 	if serverMove.Move != nil {
 		return doMoves(conn, state, *serverMove.Move)
 	} else if serverMove.Stop != nil {
-		return doStop(conn, *serverMove.Stop)
+		return doStop(state, *serverMove.Stop)
 	} else {
 		return
 	}
@@ -317,7 +315,8 @@ func pickMove(conn io.ReadWriter, state State) (err error) {
 	return
 }
 
-func doStop(conn io.ReadWriter, stop Stop) (err error) {
+func doStop(state State, stop Stop) (err error) {
+	log.Printf("I am punter %d", state.Punter)
 	for _, score := range stop.Scores {
 		log.Printf("Punter: %d score: %d", score.Punter, score.Score)
 	}
@@ -344,22 +343,21 @@ func runOnlineMode() (err error) {
 	if err != nil {
 		return
 	}
-	log.Printf("connected")
+	// log.Printf("connected")
 	err = handshake(conn)
 	if err != nil {
 		return
 	}
 
-	log.Printf("setup")
+	// log.Printf("setup")
 
 	setupRequest, err := setup(conn)
 	if err != nil {
 		return
 	}
 
-	log.Printf("game")
+	// log.Printf("game")
 	for {
-		log.Printf("Setup %+v", setupRequest)
 		var serverMove ServerMove
 		err = receive(conn, &serverMove)
 		if err != nil {
@@ -375,7 +373,7 @@ func runOnlineMode() (err error) {
 
 func runOfflineMode() (err error) {
 	conn := NewReadWriter(os.Stdin, os.Stdout)
-	log.Printf("connected")
+	// log.Printf("connected")
 	err = handshake(conn)
 	if err != nil {
 		return
@@ -393,7 +391,7 @@ func runOfflineMode() (err error) {
 	}
 
 	if serverRequest["punter"] != nil {
-		log.Printf("setup")
+		// log.Printf("setup")
 		var setupRequest SetupRequest
 		err = json.Unmarshal(b1, &setupRequest)
 		if err != nil {
@@ -402,7 +400,7 @@ func runOfflineMode() (err error) {
 		_, err = doSetup(conn, setupRequest)
 		return
 	} else if serverRequest["move"] != nil {
-		log.Printf("move")
+		// log.Printf("move")
 		var serverMove ServerMove
 		err = json.Unmarshal(b1, &serverMove)
 		if err != nil {
@@ -410,15 +408,15 @@ func runOfflineMode() (err error) {
 		}
 		return doMoves(conn, *serverMove.State, *serverMove.Move)
 	} else if serverRequest["stop"] != nil {
-		log.Printf("stop")
+		// log.Printf("stop")
 		var serverMove ServerMove
 		err = json.Unmarshal(b1, &serverMove)
 		if err != nil {
 			return
 		}
-		return doStop(conn, *serverMove.Stop)
+		return doStop(*serverMove.State, *serverMove.Stop)
 	} else {
-		err = errors.New("Unknown server request")
+		err = fmt.Errorf("Unknown server request %s", b1)
 	}
 	return
 }
@@ -435,10 +433,10 @@ func main() {
 	flag.Parse()
 	fixIO()
 	if *onlineMode {
-		log.Printf("online mode")
+		// log.Printf("online mode")
 		err = runOnlineMode()
 	} else {
-		log.Printf("offline mode")
+		// log.Printf("offline mode")
 		err = runOfflineMode()
 	}
 	if err != nil {
