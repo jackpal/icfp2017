@@ -1,0 +1,17 @@
+#!/bin/bash
+
+set -e
+set -u
+
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+GOPATH=$DIR/src
+export GOPATH
+
+rm -f ./punter
+
+cd $DIR/src/punter
+
+go build
+
+mv ./punter ../..

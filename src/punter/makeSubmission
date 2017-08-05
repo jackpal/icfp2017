@@ -1,0 +1,20 @@
+#!/bin/bash
+
+set -e
+set -u
+
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+rm -rf submission/src
+mkdir submission/src
+
+cp punter.go submission/src/punter.go
+rm -f submission/punter
+
+submission/install
+
+rm -f submission/punter
+
+cd submission
+
+tar -cvzf ../icfp-$TEAMID.tar.gz .
