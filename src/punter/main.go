@@ -389,6 +389,8 @@ func runOfflineMode() (err error) {
 	return
 }
 
+// This is needed when running under lamduct on VM. Otherwise
+// EAGAIN.
 func fixIO() {
 	fd := int(os.Stdin.Fd())
 	syscall.SetNonblock(fd, false)
