@@ -521,7 +521,12 @@ func runOfflineMode() (err error) {
 		if err != nil {
 			return
 		}
-		return doStop(serverMove.State, *serverMove.Stop)
+		state := serverMove.State
+		if state == nil {
+			log.Printf("missing state in 'stop'. Offline server error?")
+			state = &State{}
+		}
+		return doStop(state, *serverMove.Stop)
 	} else {
 		err = fmt.Errorf("Unknown server request %s", b1)
 	}
