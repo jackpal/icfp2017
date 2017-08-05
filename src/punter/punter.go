@@ -41,8 +41,18 @@ type HandshakeResponse struct {
 type PunterID uint
 type SiteID uint
 
+// Offset of river in Map.Rivers
+type RiverOffset int
+type RiverOffsets []RiverOffset
+
+// Offset of site in Map.Sites
+type SiteOffset int
+
+type ScoreValue int
+
 type Site struct {
-	ID SiteID `json:"id"`
+	ID     SiteID       `json:"id"`
+	Rivers RiverOffsets `json:"rivers",omitempty`
 }
 
 type River struct {
@@ -56,6 +66,26 @@ type Map struct {
 	Sites  []Site   `json:"sites"`
 	Rivers []River  `json:"rivers"`
 	Mines  []SiteID `json:"mines"`
+	// Lookup site from siteID
+	SiteMap map[SiteID]SiteOffset `json:siteMap,omitEmpty`
+}
+
+func (m *Map) DecorateMap() (err error) {
+	m.SiteMap = make(map[SiteID]SiteOffset)
+	for i, site := range m.Sites {
+		m.SiteMap[site.ID] = SiteOffset(i)
+	}
+	for i, river := range m.Rivers {
+		{
+			sourceIndex := m.SiteMap[river.Source]
+			m.Sites[sourceIndex].Rivers = append(m.Sites[sourceIndex].Rivers, RiverOffset(i))
+		}
+		{
+			targetIndex := m.SiteMap[river.Target]
+			m.Sites[targetIndex].Rivers = append(m.Sites[targetIndex].Rivers, RiverOffset(i))
+		}
+	}
+	return
 }
 
 type SetupRequest struct {
@@ -107,8 +137,8 @@ type Moves struct {
 }
 
 type Score struct {
-	Punter PunterID `json:"punter"`
-	Score  int      `json:"score"`
+	Punter PunterID   `json:"punter"`
+	Score  ScoreValue `json:"score"`
 }
 
 type Stop struct {
@@ -222,6 +252,7 @@ func doSetup(writer io.Writer, setupRequest SetupRequest) (state State, err erro
 	state.Punter = setupRequest.Punter
 	state.Punters = setupRequest.Punters
 	state.Map = setupRequest.Map
+	state.Map.DecorateMap()
 	setupResponse := SetupResponse{setupRequest.Punter, nil}
 	if !*onlineMode {
 		setupResponse.State = &state
