@@ -6,9 +6,9 @@ set -u
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
 rm -rf submission/src
-mkdir submission/src
+mkdir -p submission/src/punter
 
-cp punter.go submission/src/punter.go
+cp punter.go submission/src/punter/punter.go
 rm -f submission/punter
 
 submission/install
