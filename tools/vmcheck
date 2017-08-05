@@ -1,6 +1,14 @@
-#!bin/bash
+#!/bin/bash
 set -e
 set -u
+
+if [ "$(uname)" == "Darwin" ]; then
+    echo "This tool doesn't run on Darwin."
+    exit 1
+elif [ "$(expr substr $(uname -s) 1 5)" != "Linux" ]; then
+    echo "Only run this on Linux."
+    exit 2
+fi
 
 echo "Checking that lightning submission works on VM"
 
