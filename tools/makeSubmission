@@ -8,7 +8,7 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 rm -rf submission/src
 mkdir -p submission/src/punter
 
-cp punter.go submission/src/punter/punter.go
+cp $DIR/../src/punter/punter.go submission/src/punter/punter.go
 rm -f submission/punter
 
 submission/install
@@ -17,4 +17,7 @@ rm -f submission/punter
 
 cd submission
 
-tar -cvzf ../icfp-$TEAMID.tar.gz .
+SUBFILE="../../submissions/lightning/icfp-$TEAMID.tar.gz"
+rm -f $SUBFILE
+tar -cvzf $SUBFILE .
+md5 $SUBFILE
