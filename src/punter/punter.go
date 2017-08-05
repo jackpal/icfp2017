@@ -59,6 +59,8 @@ type River struct {
 	Target  SiteID   `json:"target"`
 	Claimed bool     `json:"claimed",omitempty`
 	Owner   PunterID `json:"owner",omitempty`
+	// Use for searching
+	Flags int `json:-`
 }
 
 type Map struct {
@@ -235,31 +237,34 @@ func handshake(conn io.ReadWriter) (err error) {
 	return
 }
 
-func setup(conn io.ReadWriter) (state State, err error) {
+func setup(conn io.ReadWriter) (state *State, err error) {
 	var setupRequest SetupRequest
 	err = receive(conn, &setupRequest)
 	if err != nil {
 		return
 	}
-	// log.Printf("Received setupRequest %v", setupRequest)
+	if pretty, err2 := json.MarshalIndent(&setupRequest, "", " "); err2 == nil {
+		log.Printf("Received setupRequest %s", pretty)
+	}
 	state, err = doSetup(conn, setupRequest)
 	return
 }
 
-func doSetup(writer io.Writer, setupRequest SetupRequest) (state State, err error) {
+func doSetup(writer io.Writer, setupRequest SetupRequest) (state *State, err error) {
+	state = &State{}
 	state.Punter = setupRequest.Punter
 	state.Punters = setupRequest.Punters
 	state.Map = setupRequest.Map
 	state.Map.DecorateMap()
 	setupResponse := SetupResponse{setupRequest.Punter, nil}
 	if !*onlineMode {
-		setupResponse.State = &state
+		setupResponse.State = state
 	}
 	err = send(writer, &setupResponse)
 	return
 }
 
-func processServerMove(conn io.ReadWriter, state State, serverMove ServerMove) (err error) {
+func processServerMove(conn io.ReadWriter, state *State, serverMove ServerMove) (err error) {
 	if serverMove.Move != nil {
 		return doMoves(conn, state, *serverMove.Move)
 	} else if serverMove.Stop != nil {
@@ -269,7 +274,7 @@ func processServerMove(conn io.ReadWriter, state State, serverMove ServerMove) (
 	}
 }
 
-func doMoves(conn io.ReadWriter, state State, moves Moves) (err error) {
+func doMoves(conn io.ReadWriter, state *State, moves Moves) (err error) {
 	err = processServerMoves(conn, state, moves)
 	if err != nil {
 		return
@@ -281,31 +286,64 @@ func doMoves(conn io.ReadWriter, state State, moves Moves) (err error) {
 	return
 }
 
-func processServerMoves(conn io.ReadWriter, state State, moves Moves) (err error) {
-	for _, move := range moves.Moves {
-		if move.Claim != nil {
-			for riverIndex, river := range state.Map.Rivers {
-				if river.Source == move.Claim.Source &&
-					river.Target == move.Claim.Target {
-					river.Claimed = true
-					river.Owner = move.Claim.Punter
-					state.Map.Rivers[riverIndex] = river
-					break
-				}
-			}
+type RiverEdge struct {
+	Source SiteID
+	Target SiteID
+}
+
+func (state *State) SlowRiverToRiverIndex(edge RiverEdge) (ro RiverOffset) {
+	ro = RiverOffset(-1)
+	for riverIndex, river := range state.Map.Rivers {
+		if edge.Source == river.Source && edge.Target == river.Target {
+			ro = RiverOffset(riverIndex)
+			break
 		}
 	}
 	return
 }
 
-func pickMove(conn io.ReadWriter, state State) (err error) {
+func (state *State) RiverToRiverOffset(edge RiverEdge) (ro RiverOffset) {
+	sourceOffset := state.Map.SiteMap[edge.Source]
+	sourceRivers := state.Map.Sites[sourceOffset].Rivers
+	targetOffset := state.Map.SiteMap[edge.Target]
+	targetRivers := state.Map.Sites[targetOffset].Rivers
+	var shorterRivers RiverOffsets
+	if len(sourceRivers) < len(targetRivers) {
+		shorterRivers = sourceRivers
+	} else {
+		shorterRivers = targetRivers
+	}
+	ro = RiverOffset(-1)
+	for _, riverOffset := range shorterRivers {
+		river := state.Map.Rivers[riverOffset]
+		if edge.Source == river.Source && edge.Target == river.Target {
+			ro = riverOffset
+			break
+		}
+	}
+	return
+}
+
+func processServerMoves(conn io.ReadWriter, state *State, moves Moves) (err error) {
+	for _, move := range moves.Moves {
+		if move.Claim != nil {
+			edge := RiverEdge{move.Claim.Source, move.Claim.Target}
+			riverOffset := state.RiverToRiverOffset(edge)
+			state.Map.Rivers[riverOffset].Claimed = true
+			state.Map.Rivers[riverOffset].Owner = move.Claim.Punter
+		}
+	}
+	return
+}
+
+func pickMove(conn io.ReadWriter, state *State) (err error) {
 	var move Move
-	move, err = pickFirstUnclaimed(state)
+	move, err = pickExtendRoute(state)
 	if err != nil {
 		return
 	}
 	if !*onlineMode {
-		move.State = &state
+		move.State = state
 	}
 	log.Printf("Move: %v", move)
 	err = send(conn, move)
@@ -315,7 +353,7 @@ func pickMove(conn io.ReadWriter, state State) (err error) {
 	return
 }
 
-func doStop(state State, stop Stop) (err error) {
+func doStop(state *State, stop Stop) (err error) {
 	log.Printf("I am punter %d", state.Punter)
 	for _, score := range stop.Scores {
 		log.Printf("Punter: %d score: %d", score.Punter, score.Score)
@@ -323,12 +361,12 @@ func doStop(state State, stop Stop) (err error) {
 	return
 }
 
-func pickPass(state State) (move Move, err error) {
+func pickPass(state *State) (move Move, err error) {
 	move.Pass = &Pass{state.Punter}
 	return
 }
 
-func pickFirstUnclaimed(state State) (move Move, err error) {
+func pickFirstUnclaimed(state *State) (move Move, err error) {
 	for _, river := range state.Map.Rivers {
 		if river.Claimed == false {
 			move.Claim = &Claim{state.Punter, river.Source, river.Target}
@@ -336,6 +374,74 @@ func pickFirstUnclaimed(state State) (move Move, err error) {
 		}
 	}
 	return pickPass(state)
+}
+
+func (s *State) ClaimRiverOffset(riverOffset RiverOffset, owner PunterID) {
+	s.Map.Rivers[riverOffset].Claimed = true
+	s.Map.Rivers[riverOffset].Owner = owner
+}
+
+func (s *State) UnclaimRiverOffset(riverOffset RiverOffset) {
+	s.Map.Rivers[riverOffset].Claimed = false
+	s.Map.Rivers[riverOffset].Owner = PunterID(0)
+}
+
+type RiverScore struct {
+	ScoreValue  ScoreValue
+	RiverOffset RiverOffset
+}
+
+func pickExtendRoute(state *State) (move Move, err error) {
+	best := RiverScore{ScoreValue(-1), RiverOffset(-1)}
+	for _, mine := range state.Map.Mines {
+		mineSiteOffset := state.Map.SiteMap[mine]
+		localScore := bestMove(state, mineSiteOffset, mineSiteOffset)
+		if localScore.ScoreValue > best.ScoreValue {
+			best = localScore
+		}
+	}
+	if best.ScoreValue > 0 {
+		river := state.Map.Rivers[best.RiverOffset]
+		move.Claim = &Claim{state.Punter, river.Source, river.Target}
+		return
+	}
+	log.Printf("Couldn't pick extended route.")
+	return pickFirstUnclaimed(state)
+}
+
+func bestMove(state *State, mineSiteOffset SiteOffset, currentOffset SiteOffset) (best RiverScore) {
+	for _, riverOffset := range state.Map.Sites[currentOffset].Rivers {
+		river := state.Map.Rivers[riverOffset]
+		var localBest RiverScore
+		if river.Claimed == false {
+			localBest.ScoreValue = 1
+			localBest.RiverOffset = riverOffset
+		} else if river.Owner == state.Punter {
+			if river.Flags == 0 {
+				state.Map.Rivers[riverOffset].Flags = 1
+				sourceOffset := state.Map.SiteMap[river.Source]
+				targetOffset := state.Map.SiteMap[river.Target]
+				var otherEndOffset SiteOffset
+				if sourceOffset == currentOffset {
+					otherEndOffset = targetOffset
+				} else if targetOffset == currentOffset {
+					otherEndOffset = sourceOffset
+				} else {
+					panic("Unknown offset")
+				}
+				localBest := bestMove(state, mineSiteOffset, otherEndOffset)
+				if localBest.ScoreValue > 0 {
+					// Bonus for deeper chains
+					localBest.ScoreValue += 1
+				}
+				state.Map.Rivers[riverOffset].Flags = 0
+			}
+		}
+		if localBest.ScoreValue > best.ScoreValue {
+			best = localBest
+		}
+	}
+	return
 }
 
 func runOnlineMode() (err error) {
@@ -351,7 +457,8 @@ func runOnlineMode() (err error) {
 
 	// log.Printf("setup")
 
-	setupRequest, err := setup(conn)
+	var state *State
+	state, err = setup(conn)
 	if err != nil {
 		return
 	}
@@ -363,7 +470,7 @@ func runOnlineMode() (err error) {
 		if err != nil {
 			return
 		}
-		err = processServerMove(conn, setupRequest, serverMove)
+		err = processServerMove(conn, state, serverMove)
 		if err != nil {
 			return
 		}
@@ -406,7 +513,7 @@ func runOfflineMode() (err error) {
 		if err != nil {
 			return
 		}
-		return doMoves(conn, *serverMove.State, *serverMove.Move)
+		return doMoves(conn, serverMove.State, *serverMove.Move)
 	} else if serverRequest["stop"] != nil {
 		// log.Printf("stop")
 		var serverMove ServerMove
@@ -414,7 +521,7 @@ func runOfflineMode() (err error) {
 		if err != nil {
 			return
 		}
-		return doStop(*serverMove.State, *serverMove.Stop)
+		return doStop(serverMove.State, *serverMove.Stop)
 	} else {
 		err = fmt.Errorf("Unknown server request %s", b1)
 	}
