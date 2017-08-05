@@ -200,10 +200,10 @@ func handshake(conn io.ReadWriter) (err error) {
 	// listen for reply
 	var handshakeResponse HandshakeResponse
 	err = receive(conn, &handshakeResponse)
+	// log.Printf("response %v\n", handshakeResponse)
 	if err != nil {
 		return
 	}
-	log.Printf("response %v\n", handshakeResponse)
 	return
 }
 
@@ -274,6 +274,9 @@ func pickMove(conn io.ReadWriter, state State) (err error) {
 	move, err = pickFirstUnclaimed(state)
 	if err != nil {
 		return
+	}
+	if !*onlineMode {
+		move.State = &state
 	}
 	log.Printf("Move: %v", move)
 	err = send(conn, move)
