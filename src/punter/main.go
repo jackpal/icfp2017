@@ -12,7 +12,7 @@ import (
 	"os"
 )
 
-var log *logging.Logger = logging.New(os.Stderr, "", 0)
+var log *logging.Logger = logging.New(os.Stderr, "bi: ", 0)
 
 type readWriter struct {
 	io.Reader
@@ -134,7 +134,7 @@ func findServer() (conn net.Conn, err error) {
 	return
 }
 
-func send(conn io.Writer, d interface{}) (err error) {
+func send(writer io.Writer, d interface{}) (err error) {
 	var b []byte
 	buf := bytes.NewBuffer(nil)
 	err = json.NewEncoder(buf).Encode(d)
@@ -142,9 +142,13 @@ func send(conn io.Writer, d interface{}) (err error) {
 		return
 	}
 	b = buf.Bytes()
+	// Don't need to send linefeed at end
+	b = b[:len(b)-1]
 	msg := fmt.Sprintf("%d:%s", len(b), b)
-	// log.Printf("Sending: %s", msg)
-	_, err = conn.Write([]byte(msg))
+	log.Printf("Sending: %s", msg)
+	var n int
+	n, err = io.WriteString(writer, msg)
+	log.Printf("sent %d bytes", n)
 	if err != nil {
 		return
 	}
@@ -179,7 +183,7 @@ func receive(conn io.Reader, d interface{}) (err error) {
 	if err != nil {
 		return
 	}
-	// log.Printf("Received Bytes: %d %s", len(b1), string(b1))
+	log.Printf("Received Bytes: %d %s", len(b1), string(b1))
 	err = json.Unmarshal(b1, d)
 	return err
 }
@@ -213,7 +217,7 @@ func setup(conn io.ReadWriter) (state State, err error) {
 	return
 }
 
-func doSetup(conn io.ReadWriter, setupRequest SetupRequest) (state State, err error) {
+func doSetup(writer io.Writer, setupRequest SetupRequest) (state State, err error) {
 	state.Punter = setupRequest.Punter
 	state.Punters = setupRequest.Punters
 	state.Map = setupRequest.Map
@@ -221,7 +225,7 @@ func doSetup(conn io.ReadWriter, setupRequest SetupRequest) (state State, err er
 	if !*onlineMode {
 		setupResponse.State = &state
 	}
-	err = send(conn, &setupResponse)
+	err = send(writer, &setupResponse)
 	return
 }
 
