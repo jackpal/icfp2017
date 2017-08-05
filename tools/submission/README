@@ -7,6 +7,8 @@ John Palevich
 
 We're a father-and-son team.
 
-This is our first working entry, it always claims the first unclaimed
-river.
+This is our lighting entry
+
++ It tries to make long chains of rivers from the mines.
++ It doesn't know about futures.
 
