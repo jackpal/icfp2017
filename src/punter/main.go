@@ -10,6 +10,7 @@ import (
 	logging "log"
 	"net"
 	"os"
+	"syscall"
 )
 
 var log *logging.Logger = logging.New(os.Stderr, "bi: ", 0)
@@ -388,9 +389,15 @@ func runOfflineMode() (err error) {
 	return
 }
 
+func fixIO() {
+	fd := int(os.Stdin.Fd())
+	syscall.SetNonblock(fd, false)
+}
+
 func main() {
 	var err error
 	flag.Parse()
+	fixIO()
 	if *onlineMode {
 		log.Printf("online mode")
 		err = runOnlineMode()
