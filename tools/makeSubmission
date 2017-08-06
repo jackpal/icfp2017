@@ -19,7 +19,7 @@ rm -f submission/punter
 
 cd submission
 
-SUBFILE="../../submissions/lightning/icfp-$TEAMID.tar.gz"
+SUBFILE="../../submissions/main/icfp-$TEAMID.tar.gz"
 rm -f $SUBFILE
 tar -cvzf $SUBFILE .
 md5 $SUBFILE
